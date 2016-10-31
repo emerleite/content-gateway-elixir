@@ -15,7 +15,7 @@ defmodule ContentGateway.Mixfile do
   #
   # Type "mix help compile.app" for more information
   def application do
-    [applications: [:logger, :httpoison, :cachex, :mnesia],
+    [applications: [:logger, :httpoison, :cachex, :poison, :mnesia],
      mod: {ContentGateway.App, []}]
   end
 
@@ -30,6 +30,7 @@ defmodule ContentGateway.Mixfile do
   # Type "mix help deps" for more examples and options
   defp deps do
     [
+      {:poison, "~> 3.0"},
       {:cachex, "~> 1.2.2"},
       {:httpoison, "~> 0.9.2"},
       {:excoveralls, "~> 0.5", only: :test},
