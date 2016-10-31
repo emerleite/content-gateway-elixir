@@ -1,0 +1,2 @@
+defmodule ContentGateway do
+end

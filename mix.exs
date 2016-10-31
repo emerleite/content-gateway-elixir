@@ -1,21 +1,22 @@
-defmodule ContentGatewayElixir.Mixfile do
+defmodule ContentGateway.Mixfile do
   use Mix.Project
 
   def project do
-    [app: :content_gateway_elixir,
+    [app: :content_gateway,
      version: "0.1.0",
      elixir: "~> 1.3",
-     build_embedded: Mix.env == :prod,
-     start_permanent: Mix.env == :prod,
-     deps: deps()]
+     description: description,
+     package: package,
+     test_coverage: [tool: ExCoveralls],
+     deps: deps]
   end
 
   # Configuration for the OTP application
   #
   # Type "mix help compile.app" for more information
   def application do
-    [applications: [:logger],
-     mod: {ContentGatewayElixir, []}]
+    [applications: [:logger, :httpoison, :cachex, :mnesia],
+     mod: {ContentGateway.App, []}]
   end
 
   # Dependencies can be Hex packages:
@@ -28,6 +29,27 @@ defmodule ContentGatewayElixir.Mixfile do
   #
   # Type "mix help deps" for more examples and options
   defp deps do
-    []
+    [
+      {:cachex, "~> 1.2.2"},
+      {:httpoison, "~> 0.9.2"},
+      {:excoveralls, "~> 0.5", only: :test},
+      {:credo, "~> 0.4.12", only: [:dev, :test]},
+      {:ex_doc, ">= 0.0.0", only: :dev},
+      {:fake_server, "~> 0.5.0", only: :test},
+      {:inch_ex, only: :docs}
+    ]
+  end
+
+  defp description do
+        """
+    A Gateway to fetch external content for 3rd party services.
+        """
+  end
+
+  defp package do
+    [name: :fake_server,
+     maintainers: ["Emerson Macedo"],
+     licenses: ["Apache 2.0"],
+     links: %{"GitHub" => "https://github.com/emerleite/content_gateway_elixir"}]
   end
 end

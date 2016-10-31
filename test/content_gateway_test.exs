@@ -1,6 +1,6 @@
-defmodule ContentGatewayElixirTest do
+defmodule ContentGatewayTest do
   use ExUnit.Case
-  doctest ContentGatewayElixir
+  doctest ContentGateway
 
   test "the truth" do
     assert 1 + 1 == 2
