@@ -6,19 +6,20 @@ defmodule ContentGateway do
       require Logger
 
       def connection_timeout do
-        #TODO raise when not override
-        1_000
+        raise "not implemented"
       end
 
       def request_timeout do
-        #TODO raise when not override
-        300
+        raise "not implemented"
       end
 
       def user_agent do
         "Elixir (Content Gateway)"
       end
 
+      defoverridable [connection_timeout: 0, request_timeout: 0, user_agent: 0]
+
+      #API
       def get(url, [cache_options: cache_options]), do: get(url, headers: %{}, options: %{}, cache_options: cache_options)
       def get(url, [headers: headers, cache_options: cache_options]), do: get(url, headers: headers, options: %{}, cache_options: cache_options)
       def get(url, [options: options, cache_options: cache_options]), do: get(url, headers: %{}, options: options, cache_options: cache_options)
@@ -144,8 +145,6 @@ defmodule ContentGateway do
         Cachex.set(:content_gateway_cache, key, data, [ttl: expires_in])
         data
       end
-
-      defoverridable [connection_timeout: 0, request_timeout: 0, user_agent: 0]
     end
   end
 end
