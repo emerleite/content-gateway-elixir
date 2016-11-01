@@ -1,5 +1,8 @@
 # ContentGateway
 
+[![Build Status](https://travis-ci.org/emerleite/content-gateway-elixir.svg?branch=master)](https://travis-ci.org/emerleite/content-gateway-elixir)
+[![Coverage Status](https://coveralls.io/repos/github/emerleite/content-gateway-elixir/badge.svg?branch=master)](https://coveralls.io/github/emerleite/content-gateway-elixir?branch=master)
+
 A Gateway to fetch external content for 3rd party services.
 
 ## Installation
