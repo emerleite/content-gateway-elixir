@@ -30,7 +30,7 @@ defmodule ContentGateway.Mixfile do
   # Type "mix help deps" for more examples and options
   defp deps do
     [
-      {:poison, "~> 3.0"},
+      {:poison, "~> 2.0"},
       {:cachex, "~> 1.2.2"},
       {:httpoison, "~> 0.9.2"},
       {:excoveralls, "~> 0.5", only: :test},
