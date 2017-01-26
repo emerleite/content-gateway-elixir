@@ -5,10 +5,10 @@ defmodule ContentGateway.Mixfile do
     [app: :content_gateway,
      version: "0.1.0",
      elixir: "~> 1.3",
-     description: description,
-     package: package,
+     description: description(),
+     package: package(),
      test_coverage: [tool: ExCoveralls],
-     deps: deps]
+     deps: deps()]
   end
 
   # Configuration for the OTP application
@@ -48,7 +48,7 @@ defmodule ContentGateway.Mixfile do
   end
 
   defp package do
-    [name: :fake_server,
+    [name: :content_gateway,
      maintainers: ["Emerson Macedo"],
      licenses: ["Apache 2.0"],
      links: %{"GitHub" => "https://github.com/emerleite/content_gateway_elixir"}]
