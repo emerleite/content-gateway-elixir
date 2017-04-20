@@ -46,7 +46,6 @@ defmodule ContentGateway do
       end
 
       defp request(url, headers, options) do
-        IO.puts("#{url}    |    #{headers |> merge_request_headers |> inspect}   |   #{options |> merge_request_options |> inspect}")
         case HTTPoison.get(url, headers |> merge_request_headers, options |> merge_request_options) do
           {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> {:ok, body}
           {:ok, %HTTPoison.Response{status_code: 400, body: body}} -> {:error, {:bad_request, body}}
