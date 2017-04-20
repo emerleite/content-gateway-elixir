@@ -19,6 +19,7 @@ defmodule ContentGateway do
 
       defoverridable [connection_timeout: 0, request_timeout: 0, user_agent: 0]
 
+      def get(url, options \\ %{})
       def get(url, %{headers: headers, options: options, cache_options: %{skip: true}}) do
         url
         |> request(headers, options)
@@ -36,7 +37,7 @@ defmodule ContentGateway do
             |> handle_cache(url, cache_options[:expires_in], cache_options[:stale_expires_in])
         end
       end
-      def get(url, %{} = incomplete_options \\ %{}) do
+      def get(url, %{} = incomplete_options) do
         get(url, Map.merge(incomplete_options, @default_options))
       end
 
@@ -59,7 +60,7 @@ defmodule ContentGateway do
 
       defp merge_request_headers(headers) do
         headers
-        |> Map.merge(%{"User-Agent" => user_agent})
+        |> Map.merge(%{"User-Agent" => user_agent()})
       end
       defp merge_request_options(options) do
         %{timeout: connection_timeout(), recv_timeout: request_timeout()}
