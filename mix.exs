@@ -37,7 +37,8 @@ defmodule ContentGateway.Mixfile do
       {:credo, "~> 0.4.12", only: [:dev, :test]},
       {:ex_doc, ">= 0.0.0", only: :dev},
       {:fake_server, "~> 0.5.0", only: :test},
-      {:inch_ex, only: :docs}
+      {:mock, "~> 0.2.0", only: :test},
+      {:inch_ex, only: :docs},
     ]
   end
 
