@@ -112,11 +112,15 @@ defmodule ContentGateway do
         end
       end
 
-      defp store_on_cache(data, key, expires_in, nil), do: store_on_cache(data, key, expires_in)
+      defp store_on_cache(data, key, expires_in, nil) do
+        store_on_cache(data, key, expires_in)
+        |> to_ok_tuple
+      end
       defp store_on_cache(data, key, expires_in, stale_expires_in) do
         data
         |> store_on_cache(key, expires_in)
         |> store_on_cache("stale:#{key}", stale_expires_in)
+        |> to_ok_tuple
       end
       defp store_on_cache(data, key, expires_in) when is_function(expires_in) do
         Cachex.set(:content_gateway_cache, key, data, [ttl: expires_in.(data)])
@@ -126,6 +130,8 @@ defmodule ContentGateway do
         Cachex.set(:content_gateway_cache, key, data, [ttl: expires_in])
         data
       end
+
+      defp to_ok_tuple(value), do: {:ok, value}
     end
   end
 end
