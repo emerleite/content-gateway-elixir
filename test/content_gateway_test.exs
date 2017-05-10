@@ -21,6 +21,9 @@ defmodule ContentGatewayTest do
     cache_options: %{expires_in: :timer.minutes(2), stale_expires_in: :timer.minutes(3)},
   }
 
+  defp missing(_, _), do: {:missing, nil}
+  defp stored(_, _, _, _), do: {:ok, true}
+
   setup do
     Cachex.clear(:content_gateway_cache)
     :ok
@@ -86,6 +89,14 @@ defmodule ContentGatewayTest do
       end
       stub_httpoison_error do
         assert GenericApi.get(@host, @default_options) == {:ok, %{"status" => "success"}}
+      end
+    end
+
+    test_with_mock "always return a tuple", Cachex, [get: &missing/2, set: &stored/4] do
+      Cachex.set(:content_gateway_cache, @host, %{"status" => "success"}, [ttl: 120000])
+      stub_httpoison_success do
+        {:ok, data} = GenericApi.get(@host, @default_options)
+        assert data == %{"status" => "success"}
       end
     end
   end
