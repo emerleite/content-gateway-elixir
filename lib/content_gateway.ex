@@ -4,6 +4,7 @@ defmodule ContentGateway do
       require Logger
 
       @default_options %{headers: %{}, options: %{}, cache_options: %{skip: true}}
+      @default_ttl %{}
 
       def connection_timeout do
         raise "not implemented"
@@ -21,24 +22,33 @@ defmodule ContentGateway do
 
       def get(url, options \\ %{})
       def get(url, %{headers: headers, options: options, cache_options: %{skip: true}}) do
+        Logger.debug "Cache will be skipped."
         url
         |> request(headers, options)
         |> report_http_error(url)
         |> process_response
+        |> handle_cache(url)
       end
       def get(url, %{headers: headers, options: options, cache_options: cache_options} = all_options) do
+        Logger.debug "Trying to get data from cache..."
         case Cachex.get(:content_gateway_cache, url) do
           {:ok, value} ->
-            Logger.debug "[HIT] #{url}"
+            Logger.debug "\t[HIT] #{url}"
             {:ok, value}
           {:missing, nil} ->
-            Logger.info "[MISS] #{url}"
+            Logger.debug "\t[MISS] #{url}"
             get(url, %{all_options | cache_options: %{skip: true}})
-            |> handle_cache(url, cache_options[:expires_in], cache_options[:stale_expires_in])
         end
       end
       def get(url, %{} = incomplete_options) do
-        get(url, Map.merge(incomplete_options, @default_options))
+        Logger.debug "Incomplete options. Content Gateway will merge those options with default_options."
+        options = Map.merge(@default_options, incomplete_options)
+        
+        if Map.has_key?(incomplete_options, :cache_options) do
+          options = put_in(options[:cache_options][:skip], false)
+        end
+          
+        get(url, options)
       end
 
       def clear_cache(url) do
@@ -46,17 +56,24 @@ defmodule ContentGateway do
         Cachex.del(:content_gateway_cache, "stale:#{url}")
       end
 
+      @lint {Credo.Check.Readability.MaxLineLength, false}
       defp request(url, headers, options) do
-        case HTTPoison.get(url, headers |> merge_request_headers, options |> merge_request_options) do
+        response = url
+        |> HTTPoison.get(headers |> merge_request_headers, options |> merge_request_options)
+
+        case response do
           {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> {:ok, body}
-          {:ok, %HTTPoison.Response{status_code: 400, body: body}} -> {:error, {:bad_request, body}}
-          {:ok, %HTTPoison.Response{status_code: 401, body: body}} -> {:error, {:unauthorized, body}}
-          {:ok, %HTTPoison.Response{status_code: 403, body: body}} -> {:error, {:forbidden, body}}
-          {:ok, %HTTPoison.Response{status_code: 404, body: body}} -> {:error, {:not_found, body}}
-          {:ok, %HTTPoison.Response{status_code: status, body: body}} -> {:error, "Request failed [url:#{url}] [status:#{status}]"}
-          {:error, %HTTPoison.Error{reason: reason}} -> {:error, "Request Error [url:#{url}] - [#{reason}]"}
+          {:ok, %HTTPoison.Response{status_code: 400, body: _}} -> as_error :bad_request
+          {:ok, %HTTPoison.Response{status_code: 401, body: _}} -> as_error :unauthorized
+          {:ok, %HTTPoison.Response{status_code: 403, body: _}} -> as_error :forbidden
+          {:ok, %HTTPoison.Response{status_code: 404, body: _}} -> as_error :not_found
+          {:ok, %HTTPoison.Response{status_code: status, body: _}} -> status |> as_custom_error url
+          {:error, %HTTPoison.Error{reason: reason}} -> reason |> as_custom_error url 
         end
       end
+
+      defp as_error(description), do: {:error, {description, <<>>}}
+      defp as_custom_error(reason, url), do: {:error, "Request failed [url: #{url}] [reason: #{reason}]"}
 
       defp merge_request_headers(headers) do
         headers
@@ -99,12 +116,21 @@ defmodule ContentGateway do
             {:error, :parse_error}
         end
       end
-
-      defp handle_cache({:ok, body}, key, expires_in, stale_expires_in), do: store_on_cache(body, key, expires_in, stale_expires_in)
-      defp handle_cache({:error, message}, key, _expires_in, _stale_expires_in) do
+      
+      defp handle_cache({:ok, body}, key) do
+        body 
+        |> store_on_cache(key)
+        |> to_ok_tuple
+      end      
+      defp handle_cache({:ok, body}, key, options) do
+        body
+        |> store_on_cache(key, options[:expires_in], options[:stale_expires_in])
+        |> to_ok_tuple
+      end
+      defp handle_cache({:error, message}, key) do
         case Cachex.get(:content_gateway_cache, "stale:#{key}") do
           {:ok, value} ->
-            Logger.info "[STALE] #{key}"
+            Logger.debug "[STALE] #{key}"
             {:ok, value}
           {:missing, nil} ->
             Logger.warn message
@@ -112,26 +138,28 @@ defmodule ContentGateway do
         end
       end
 
-      defp store_on_cache(data, key, expires_in, nil) do
-        store_on_cache(data, key, expires_in)
-        |> to_ok_tuple
-      end
+      defp to_ok_tuple(value), do: {:ok, value}
+
+      defp store_on_cache(data, key), do: store_on_cachex(data, key)
+      defp store_on_cache(data, key, expires_in), do: store_on_cachex(data, key, expires_in)
       defp store_on_cache(data, key, expires_in, stale_expires_in) do
         data
-        |> store_on_cache(key, expires_in)
-        |> store_on_cache("stale:#{key}", stale_expires_in)
-        |> to_ok_tuple
+        |> store_on_cachex(key, expires_in)
+        |> store_on_cachex("stale:#{key}", stale_expires_in)
       end
-      defp store_on_cache(data, key, expires_in) when is_function(expires_in) do
-        Cachex.set(:content_gateway_cache, key, data, [ttl: expires_in.(data)])
+
+      defp store_on_cachex(data, key) do
+        Cachex.set(:content_gateway_cache, key, data) 
         data
       end
-      defp store_on_cache(data, key, expires_in) do
+      defp store_on_cachex(data, key, expires_in) when is_function(expires_in) do
+        Cachex.set(:content_gateway_cache, key, data, [ttl: expires_in.(data)]) 
+        data
+      end
+      defp store_on_cachex(data, key, expires_in) do
         Cachex.set(:content_gateway_cache, key, data, [ttl: expires_in])
         data
       end
-
-      defp to_ok_tuple(value), do: {:ok, value}
     end
   end
 end
