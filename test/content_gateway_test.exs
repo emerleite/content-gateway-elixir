@@ -50,6 +50,17 @@ defmodule ContentGatewayTest do
     end
   end
 
+  defmacro stub_httpoison_custom(status, expression) do
+    quote do
+      custom_response_to_return = %HTTPoison.Response{
+        status_code: unquote(status),
+        body: "{\"message\":\"Whatever\"}"
+      }
+
+      with_mock(HTTPoison, [get: fn(_, _, _) -> {:ok, custom_response_to_return} end], unquote(expression))
+    end
+  end
+
   defmacro stub_cachex_missing(expression) do
     quote do
       with_mock(Cachex, [get: &stub_cachex_get/2, set: &stub_cachex_set_def/3], unquote(expression))
@@ -122,6 +133,21 @@ defmodule ContentGatewayTest do
           GenericApi.get(@host, %{cache_options: expiring})
         end
         assert called Cachex.get(@cache_name, @host)
+      end
+    end
+
+    test "returns 4xx errors with description" do
+      stub_httpoison_custom 400 do
+        assert GenericApi.get(@host) == {:error, :bad_request}
+      end
+      stub_httpoison_custom 401 do
+        assert GenericApi.get(@host) == {:error, :unauthorized}
+      end
+      stub_httpoison_custom 403 do
+        assert GenericApi.get(@host) == {:error, :forbidden}
+      end
+      stub_httpoison_custom 404 do
+        assert GenericApi.get(@host) == {:error, :not_found}
       end
     end
   end
