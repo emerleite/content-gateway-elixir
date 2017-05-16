@@ -15,12 +15,17 @@ defmodule ContentGatewayTest do
   alias ContentGatewayTest.GenericApi
 
   @host "http://whatever.host.com"
+  @stale_key "stale:#{@host}"
   @cache_name :content_gateway_cache
+
+  @empty_options %{headers: %{}, options: %{}, cache_options: %{}}
   @default_options %{
     headers: %{"Content-Type" => "application/json"},
     options: %{timeout: :timer.seconds(10), recv_timeout: :timer.seconds(5)},
     cache_options: %{expires_in: :timer.minutes(2), stale_expires_in: :timer.minutes(3)},
   }
+
+  @successful_response %{"status" => "success"}
   @fake_response_200 %HTTPoison.Response{
     status_code: 200,
     body: "{\"status\":\"success\"}"
@@ -30,7 +35,11 @@ defmodule ContentGatewayTest do
     body: "{\"message\":\"Internal server error\"}"
   }
 
-  defp stub_cachex_get(_, _), do: {:missing, nil}
+  defp stub_httpoison_200(_, _, _), do: {:ok, @fake_response_200}
+  defp stub_httpoison_500(_, _, _), do: {:ok, @fake_response_500}
+  defp stub_cachex_found(_, _), do: {:ok, @successful_response}
+  defp stub_cachex_missing(_, _), do: {:missing, nil}
+  defp stub_cachex_set(_, _, _), do: {:ok, true}
   defp stub_cachex_set(_, _, _, _), do: {:ok, true}
 
   setup do
@@ -38,19 +47,36 @@ defmodule ContentGatewayTest do
     :ok
   end
 
-  defmacro stub_httpoison_success(expression) do
+  defmacro stub_httpoison_success_cachex_ok(expression) do
     quote do
-      with_mock(HTTPoison, [get: fn(_, _, _) -> {:ok, @fake_response_200} end], unquote(expression))
+      with_mocks([
+        {HTTPoison, [], [get: &stub_httpoison_200/3]},
+        {Cachex, [], [get: &stub_cachex_found/2, set: &stub_cachex_set/3, set: &stub_cachex_set/4]}
+      ], unquote(expression))
+    end
+  end
+
+  defmacro stub_httpoison_success_cachex_missing(expression) do
+    quote do
+      with_mocks([
+        {HTTPoison, [], [get: &stub_httpoison_200/3]},
+        {Cachex, [], [get: &stub_cachex_missing/2, set: &stub_cachex_set/3, set: &stub_cachex_set/4]}
+      ], unquote(expression))
     end
   end
 
   defmacro stub_httpoison_error(expression) do
     quote do
-      with_mock(HTTPoison, [get: fn(_, _, _) -> {:ok, @fake_response_500} end], unquote(expression))
+      #with_mocks(HTTPoison, [get: &stub_httpoison_500/3], unquote(expression))
+
+      with_mocks([
+        {HTTPoison, [], [get: &stub_httpoison_500/3]},
+        {Cachex, [], [get: &stub_cachex_missing/2, set: &stub_cachex_set/3, set: &stub_cachex_set/4]}
+      ], unquote(expression))
     end
   end
 
-  defmacro stub_httpoison_custom(status, expression) do
+  defmacro stub_httpoison_4xx(status, expression) do
     quote do
       custom_response_to_return = %HTTPoison.Response{
         status_code: unquote(status),
@@ -61,32 +87,33 @@ defmodule ContentGatewayTest do
     end
   end
 
-  defmacro stub_cachex_missing(expression) do
-    quote do
-      with_mock(Cachex, [get: &stub_cachex_get/2, set: &stub_cachex_set/4], unquote(expression))
-    end
-  end
-
   describe "#get" do
-    test "always request when cache_options is not passed" do
+    test "must request when cache_options is not passed" do
       options = @default_options |> Map.delete(:cache_options)
-      stub_httpoison_success do
+      stub_httpoison_success_cachex_missing do
         GenericApi.get(@host, options)
         assert called HTTPoison.get(@host, :_, :_)
       end
-      stub_httpoison_success do
-        GenericApi.get(@host, options)
+    end
+
+    test "must request when [:cache_options][:skip] is true" do
+      stub_httpoison_success_cachex_ok do
+        skip_cache = %{cache_options: %{skip: true}}
+        GenericApi.get(@host, @empty_options |> Map.merge(skip_cache))
         assert called HTTPoison.get(@host, :_, :_)
+        refute called Cachex.get(@cache_name, @host)
       end
     end
 
     test "do not request the same url twice if it is cached" do
-      stub_httpoison_success do
+      stub_httpoison_success_cachex_missing do
         GenericApi.get(@host, @default_options)
         assert called HTTPoison.get(@host, :_, :_)
+        assert called Cachex.set(@cache_name, @host, :_, :_)
       end
-      stub_httpoison_success do
+      stub_httpoison_success_cachex_ok do
         GenericApi.get(@host, @default_options)
+        assert called Cachex.get(@cache_name, @host)
         refute called HTTPoison.get(@host, :_, :_)
       end
     end
@@ -94,70 +121,95 @@ defmodule ContentGatewayTest do
     test "do not cache errors" do
       stub_httpoison_error do
         GenericApi.get(@host, @default_options)
+        refute called Cachex.set(:_, :_, :_)
+        refute called Cachex.set(:_, :_, :_, :_)
       end
-      stub_httpoison_success do
-        GenericApi.get(@host, @default_options)
+      with_mock(HTTPoison, [get: &stub_httpoison_200/3]) do
+        assert GenericApi.get(@host, @default_options) == {:ok, @successful_response}
         assert called HTTPoison.get(@host, :_, :_)
       end
     end
 
     test "use default options when only the url is specified" do
-      stub_httpoison_success do
+      expected_headers = %{"User-Agent" => GenericApi.user_agent()}
+      expected_options = [
+        recv_timeout: GenericApi.request_timeout(),
+        timeout: GenericApi.connection_timeout()
+      ]
+
+      stub_httpoison_success_cachex_missing do
         GenericApi.get(@host)
-        assert called HTTPoison.get(@host, %{"User-Agent" => GenericApi.user_agent()}, [recv_timeout: GenericApi.request_timeout(), timeout: GenericApi.connection_timeout()])
+        assert called HTTPoison.get(@host, expected_headers, expected_options)
       end
     end
 
-    test "return stale on error" do
-      stub_httpoison_success do
+    test "returns stale data (if exists) on error" do
+      #Making sure there is no stale data on cache.
+      assert Cachex.get(@cache_name, @host) == {:missing, nil}
+      assert Cachex.get(@cache_name, @stale_key) == {:missing, nil}
+
+      #Puting some data on cache
+      fake_response = %HTTPoison.Response{
+        status_code: 200,
+        body: "{\"data\":\"staled\"}"
+      }
+      HTTPoison
+      |> with_mock [get: fn(_, _, _) -> {:ok, fake_response} end] do
         GenericApi.get(@host, @default_options)
         assert called HTTPoison.get(@host, :_, :_)
+        assert Cachex.get(@cache_name, @host) == {:ok, %{"data" => "staled"}}
       end
-      stub_httpoison_error do
-        assert GenericApi.get(@host, @default_options) == {:ok, %{"status" => "success"}}
+
+      #Making sure that stale data will be returned on unsuccessful requests
+      HTTPoison
+      |> with_mock [get: &stub_httpoison_500/3] do
+        assert GenericApi.get(@host, @default_options) == {:ok, %{"data" => "staled"}}
       end
     end
 
     test "wont skip cache if any options is present" do
       expiring = %{expires_in: :timer.minutes(2), stale_expires_in: :timer.minutes(3)}
-      stub_cachex_missing do
-        stub_httpoison_success do
-          GenericApi.get(@host, %{cache_options: expiring})
-        end
+      stub_httpoison_success_cachex_ok do
+        GenericApi.get(@host, %{cache_options: expiring})
         assert called Cachex.get(@cache_name, @host)
+        refute called HTTPoison.get(@host, :_, :_)
       end
     end
 
-    test_with_mock "always return a tuple", Cachex, [get: &stub_cachex_get/2, set: &stub_cachex_set/4] do
-      stub_httpoison_success do
-        {:ok, data} = GenericApi.get(@host, @default_options)
-        assert data == %{"status" => "success"}
+    test "always return a tuple" do
+      stub_httpoison_success_cachex_ok do
+        assert GenericApi.get(@host, @default_options) == {:ok, %{"status" => "success"}}
       end
     end
 
     test "returns 4xx errors with description" do
-      stub_httpoison_custom 400 do
+      stub_httpoison_4xx 400 do
         assert GenericApi.get(@host) == {:error, :bad_request}
       end
-      stub_httpoison_custom 401 do
+      stub_httpoison_4xx 401 do
         assert GenericApi.get(@host) == {:error, :unauthorized}
       end
-      stub_httpoison_custom 403 do
+      stub_httpoison_4xx 403 do
         assert GenericApi.get(@host) == {:error, :forbidden}
       end
-      stub_httpoison_custom 404 do
+      stub_httpoison_4xx 404 do
         assert GenericApi.get(@host) == {:error, :not_found}
       end
     end
-  end
 
-  describe "cache" do
-    test "will expire" do
-      stub_httpoison_success do
-        cache_expires_in = %{cache_options: %{expires_in: :timer.seconds(2)}}
+    test "returns an error if there is no stale data on cache" do
+      stub_httpoison_error do
+        assert GenericApi.get(@host) == {:error, :no_stale}
+        assert called HTTPoison.get(@host, :_, :_)
+      end
+    end
+
+    test "cache will expire" do
+      stub_httpoison_success_cachex_ok do
+        cache_expires_in = %{cache_options: %{expires_in: :timer.seconds(1)}}
         assert GenericApi.get(@host, cache_expires_in) == {:ok, %{"status" => "success"}}
       end
-      :timer.sleep(3_000) #waiting cache expires
+      :timer.sleep(1_100) #waiting cache expires
       stub_httpoison_error do
         forces_cache = %{headers: %{}, options: %{}, cache_options: %{skip: false}}
         assert GenericApi.get(@host, forces_cache) == {:error, :no_stale}

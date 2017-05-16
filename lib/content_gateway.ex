@@ -22,31 +22,26 @@ defmodule ContentGateway do
 
       def get(url, options \\ %{})
       def get(url, %{headers: headers, options: options, cache_options: %{skip: true}}) do
-        Logger.debug "Cache will be skipped."
         url
         |> request(headers, options)
         |> report_http_error(url)
         |> process_response
       end
       def get(url, %{headers: headers, options: options, cache_options: cache_options} = all_options) do
-        Logger.debug "Trying to get data from cache..."
         case Cachex.get(:content_gateway_cache, url) do
           {:ok, value} ->
             Logger.debug "\t[HIT] #{url}"
             {:ok, value}
           {:missing, nil} ->
-            Logger.debug "\t[MISS] #{url}"
+            Logger.debug "\t[MISS] \#{url}"
             get(url, %{all_options | cache_options: %{skip: true}})
             |> handle_cache(url, cache_options)
         end
       end
       def get(url, %{} = incomplete_options) do
-        Logger.debug "Incomplete options. Content Gateway will merge those options with default_options."
-        options = Map.merge(@default_options, incomplete_options)
-        if Map.has_key?(incomplete_options, :cache_options) do
-          options = put_in(options[:cache_options][:skip], false)
-        end
-
+        options = @default_options |> Map.merge(incomplete_options)
+        skip_defined? = incomplete_options[:cache_options][:skip] != nil
+        unless skip_defined?, do: options = put_in(options[:cache_options][:skip], false)
         get(url, options)
       end
 
@@ -57,9 +52,9 @@ defmodule ContentGateway do
 
       @lint {Credo.Check.Readability.MaxLineLength, false}
       defp request(url, headers, options) do
-        response = url
-        |> HTTPoison.get(headers |> merge_request_headers, options |> merge_request_options)
-        case response do
+        merged_headers = headers |> merge_request_headers
+        merged_options = options |> merge_request_options
+        case url |> HTTPoison.get(merged_headers, merged_options) do
           {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> {:ok, body}
           {:ok, %HTTPoison.Response{status_code: 400}} -> as_error :bad_request
           {:ok, %HTTPoison.Response{status_code: 401}} -> as_error :unauthorized
@@ -125,9 +120,12 @@ defmodule ContentGateway do
         |> store_on_cache(key, options[:expires_in], options[:stale_expires_in])
         |> to_ok_tuple
       end
-      defp handle_cache({:error, {message, ""}}, key), do: {:error, message}
+      defp handle_cache({:error, :bad_request}, key), do: {:error, :bad_request}
+      defp handle_cache({:error, :unauthorized}, key), do: {:error, :unauthorized}
+      defp handle_cache({:error, :forbidden}, key), do: {:error, :forbidden}
+      defp handle_cache({:error, :not_found}, key), do: {:error, :not_found}
       defp handle_cache({:error, message} = err, key, _), do: handle_cache(err, key)
-      defp handle_cache({:error, message}, key) do
+      defp handle_cache({:error, message} = result, key) do
         case Cachex.get(:content_gateway_cache, "stale:#{key}") do
           {:ok, value} ->
             Logger.debug "[STALE] #{key}"
@@ -137,10 +135,12 @@ defmodule ContentGateway do
             {:error, :no_stale}
         end
       end
+      defp handle_cache_for_4xx(error_4xx), do: {:error}
 
       defp to_ok_tuple(value), do: {:ok, value}
 
       defp store_on_cache(data, key, expires_in, nil), do: store_on_cache(data, key, expires_in)
+      defp store_on_cache(data, key, nil, nil), do: store_on_cache(data, key)
       defp store_on_cache(data, key, expires_in, stale_expires_in) do
         data
         |> store_on_cachex(key, expires_in)
