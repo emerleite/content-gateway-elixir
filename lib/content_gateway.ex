@@ -27,7 +27,6 @@ defmodule ContentGateway do
         |> request(headers, options)
         |> report_http_error(url)
         |> process_response
-        |> handle_cache(url)
       end
       def get(url, %{headers: headers, options: options, cache_options: cache_options} = all_options) do
         Logger.debug "Trying to get data from cache..."
@@ -38,12 +37,12 @@ defmodule ContentGateway do
           {:missing, nil} ->
             Logger.debug "\t[MISS] #{url}"
             get(url, %{all_options | cache_options: %{skip: true}})
+            |> handle_cache(url, cache_options)
         end
       end
       def get(url, %{} = incomplete_options) do
         Logger.debug "Incomplete options. Content Gateway will merge those options with default_options."
         options = Map.merge(@default_options, incomplete_options)
-
         if Map.has_key?(incomplete_options, :cache_options) do
           options = put_in(options[:cache_options][:skip], false)
         end
@@ -86,19 +85,19 @@ defmodule ContentGateway do
 
       defp report_http_error({:error, {:bad_request, body}} = result, url) do
         Logger.info "Bad Request [url:#{url}]"
-        result
+        {:error, :bad_request}
       end
       defp report_http_error({:error, {:unauthorized, body}} = result, url) do
         Logger.info "Unauthorized [url:#{url}]"
-        result
+        {:error, :unauthorized}
       end
       defp report_http_error({:error, {:forbidden, body}} = result, url) do
         Logger.info "Forbidden [url:#{url}]"
-        result
+        {:error, :forbidden}
       end
       defp report_http_error({:error, {:not_found, body}} = result, url) do
         Logger.info "Resource Not Found [url:#{url}]"
-        result
+        {:error, :not_found}
       end
       defp report_http_error(return, _url), do: return
 
@@ -127,6 +126,7 @@ defmodule ContentGateway do
         |> to_ok_tuple
       end
       defp handle_cache({:error, {message, ""}}, key), do: {:error, message}
+      defp handle_cache({:error, message} = err, key, _), do: handle_cache(err, key)
       defp handle_cache({:error, message}, key) do
         case Cachex.get(:content_gateway_cache, "stale:#{key}") do
           {:ok, value} ->
@@ -140,13 +140,15 @@ defmodule ContentGateway do
 
       defp to_ok_tuple(value), do: {:ok, value}
 
-      defp store_on_cache(data, key), do: store_on_cachex(data, key)
-      defp store_on_cache(data, key, expires_in), do: store_on_cachex(data, key, expires_in)
+      defp store_on_cache(data, key, expires_in, nil), do: store_on_cache(data, key, expires_in)
       defp store_on_cache(data, key, expires_in, stale_expires_in) do
         data
         |> store_on_cachex(key, expires_in)
         |> store_on_cachex("stale:#{key}", stale_expires_in)
       end
+      defp store_on_cache(data, key, nil), do: store_on_cache(data, key)
+      defp store_on_cache(data, key, expires_in), do: store_on_cachex(data, key, expires_in)
+      defp store_on_cache(data, key), do: store_on_cachex(data, key)
 
       defp store_on_cachex(data, key) do
         Cachex.set(:content_gateway_cache, key, data)
