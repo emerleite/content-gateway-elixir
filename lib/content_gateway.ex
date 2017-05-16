@@ -40,9 +40,10 @@ defmodule ContentGateway do
       end
       def get(url, %{} = incomplete_options) do
         options = @default_options |> Map.merge(incomplete_options)
-        skip_defined? = incomplete_options[:cache_options][:skip] != nil
-        unless skip_defined?, do: options = put_in(options[:cache_options][:skip], false)
-        get(url, options)
+        skip_option_undefined = incomplete_options[:cache_options][:skip] == nil
+        options = if skip_option_undefined, do: put_in(options[:cache_options][:skip], false)
+        url
+        |> get(options)
       end
 
       def clear_cache(url) do
@@ -60,8 +61,8 @@ defmodule ContentGateway do
           {:ok, %HTTPoison.Response{status_code: 401}} -> as_error :unauthorized
           {:ok, %HTTPoison.Response{status_code: 403}} -> as_error :forbidden
           {:ok, %HTTPoison.Response{status_code: 404}} -> as_error :not_found
-          {:ok, %HTTPoison.Response{status_code: status}} -> status |> as_custom_error url
-          {:error, %HTTPoison.Error{reason: reason}} -> reason |> as_custom_error url
+          {:ok, %HTTPoison.Response{status_code: status}} -> status |> as_custom_error(url)
+          {:error, %HTTPoison.Error{reason: reason}} -> reason |> as_custom_error(url)
         end
       end
 
