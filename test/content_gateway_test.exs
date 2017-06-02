@@ -105,6 +105,22 @@ defmodule ContentGatewayTest do
       end
     end
 
+    test "do not use cache when no options are passed" do
+      stub_httpoison_success_cachex_ok do
+        GenericApi.get(@host)
+        assert called HTTPoison.get(@host, :_, :_)
+        refute called Cachex.get(@cache_name, @host)
+      end
+    end
+
+    test "can receive only cache options" do
+      stub_httpoison_success_cachex_ok do
+        GenericApi.get(@host, %{cache_options: %{skip: true}})
+        assert called HTTPoison.get(@host, :_, :_)
+        refute called Cachex.get(@cache_name, @host)
+      end
+    end
+
     test "do not request the same url twice if it is cached" do
       stub_httpoison_success_cachex_missing do
         GenericApi.get(@host, @default_options)
@@ -199,7 +215,7 @@ defmodule ContentGatewayTest do
 
     test "returns an error if there is no stale data on cache" do
       stub_httpoison_error do
-        assert GenericApi.get(@host) == {:error, :no_stale}
+        assert GenericApi.get(@host, %{cache_options: %{skip: false}}) == {:error, :no_stale}
         assert called HTTPoison.get(@host, :_, :_)
       end
     end

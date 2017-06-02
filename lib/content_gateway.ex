@@ -40,10 +40,11 @@ defmodule ContentGateway do
       end
       def get(url, %{} = incomplete_options) do
         options = @default_options |> Map.merge(incomplete_options)
-        skip_option_undefined = incomplete_options[:cache_options][:skip] == nil
-        options = if skip_option_undefined, do: put_in(options[:cache_options][:skip], false)
-        url
-        |> get(options)
+        skip_option_undefined = is_nil(incomplete_options[:cache_options]) || Enum.empty?(incomplete_options[:cache_options])
+        if skip_option_undefined do
+          options = Map.put(options, :cache_options, %{skip: true})
+        end
+        url |> get(options)
       end
 
       def clear_cache(url) do
