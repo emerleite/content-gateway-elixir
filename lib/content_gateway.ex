@@ -34,17 +34,17 @@ defmodule ContentGateway do
             {:ok, value}
           {:missing, nil} ->
             Logger.debug "\t[MISS] \#{url}"
-            get(url, %{all_options | cache_options: %{skip: true}})
+            url
+            |> get(%{all_options | cache_options: %{skip: true}})
             |> handle_cache(url, cache_options)
         end
       end
       def get(url, %{} = incomplete_options) do
         options = @default_options |> Map.merge(incomplete_options)
         skip_option_undefined = is_nil(incomplete_options[:cache_options]) || Enum.empty?(incomplete_options[:cache_options])
-        if skip_option_undefined do
-          options = Map.put(options, :cache_options, %{skip: true})
-        end
-        url |> get(options)
+        options = if skip_option_undefined, do: Map.put(options, :cache_options, %{skip: true}), else: options
+        url 
+        |> get(options)
       end
 
       def clear_cache(url) do
@@ -56,7 +56,8 @@ defmodule ContentGateway do
       defp request(url, headers, options) do
         merged_headers = headers |> merge_request_headers
         merged_options = options |> merge_request_options
-        case url |> HTTPoison.get(merged_headers, merged_options) do
+        response = url |> HTTPoison.get(merged_headers, merged_options)
+        case response do
           {:ok, %HTTPoison.Response{status_code: 200, body: body}} -> {:ok, body}
           {:ok, %HTTPoison.Response{status_code: 400}} -> as_error :bad_request
           {:ok, %HTTPoison.Response{status_code: 401}} -> as_error :unauthorized
@@ -67,6 +68,14 @@ defmodule ContentGateway do
         end
       end
 
+      def caller_module do
+        [_elixir_prefix | parts] = String.split(to_string(__MODULE__), ".")
+        parts
+        |> Enum.join("_")
+        |> String.downcase
+        |> String.to_atom
+      end
+
       defp as_error(description), do: {:error, {description, <<>>}}
       defp as_custom_error(reason, url), do: {:error, "Request failed [url: #{url}] [reason: #{reason}]"}
 
@@ -75,7 +84,13 @@ defmodule ContentGateway do
         |> Map.merge(%{"User-Agent" => user_agent()})
       end
       defp merge_request_options(options) do
-        %{timeout: connection_timeout(), recv_timeout: request_timeout()}
+        initial_options = %{
+          timeout: connection_timeout(),
+          recv_timeout: request_timeout(),
+          hackney: [pool: caller_module()]
+        }
+
+        initial_options
         |> Map.merge(options)
         |> Map.to_list
       end

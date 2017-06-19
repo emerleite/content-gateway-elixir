@@ -149,6 +149,7 @@ defmodule ContentGatewayTest do
     test "use default options when only the url is specified" do
       expected_headers = %{"User-Agent" => GenericApi.user_agent()}
       expected_options = [
+        hackney: [pool: GenericApi.caller_module()],
         recv_timeout: GenericApi.request_timeout(),
         timeout: GenericApi.connection_timeout()
       ]
@@ -230,6 +231,10 @@ defmodule ContentGatewayTest do
         forces_cache = %{headers: %{}, options: %{}, cache_options: %{skip: false}}
         assert GenericApi.get(@host, forces_cache) == {:error, :no_stale}
       end
+    end
+
+    test "gets caller module" do
+      assert GenericApi.caller_module == :contentgatewaytest_genericapi
     end
   end
 end
