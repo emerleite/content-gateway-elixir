@@ -5,6 +5,16 @@ defmodule ContentGateway do
 
       @default_options %{headers: %{}, options: %{}, cache_options: %{skip: true}}
       @default_ttl %{}
+      @default_pool __MODULE__
+
+      def start_link(opts \\ []) do
+        opts = [timeout: 15000, max_connections: 100]
+        :hackney_pool.child_spec(@default_pool, opts)
+      end
+
+      def pool_size do
+        :hackney_pool.count(@default_pool)
+      end
 
       def connection_timeout do
         raise "not implemented"
@@ -43,7 +53,7 @@ defmodule ContentGateway do
         options = @default_options |> Map.merge(incomplete_options)
         skip_option_undefined = is_nil(incomplete_options[:cache_options]) || Enum.empty?(incomplete_options[:cache_options])
         options = if skip_option_undefined, do: Map.put(options, :cache_options, %{skip: true}), else: options
-        url 
+        url
         |> get(options)
       end
 
@@ -68,14 +78,6 @@ defmodule ContentGateway do
         end
       end
 
-      def caller_module do
-        [_elixir_prefix | parts] = String.split(to_string(__MODULE__), ".")
-        parts
-        |> Enum.join("_")
-        |> String.downcase
-        |> String.to_atom
-      end
-
       defp as_error(description), do: {:error, {description, <<>>}}
       defp as_custom_error(reason, url), do: {:error, "Request failed [url: #{url}] [reason: #{reason}]"}
 
@@ -87,7 +89,7 @@ defmodule ContentGateway do
         initial_options = %{
           timeout: connection_timeout(),
           recv_timeout: request_timeout(),
-          hackney: [pool: caller_module()]
+          hackney: [pool: @default_pool]
         }
 
         initial_options

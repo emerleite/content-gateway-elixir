@@ -3,7 +3,7 @@ defmodule ContentGateway.Mixfile do
 
   def project do
     [app: :content_gateway,
-     version: "1.0.3",
+     version: "1.1.0",
      elixir: "~> 1.3",
      description: description(),
      package: package(),
